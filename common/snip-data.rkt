@@ -9,7 +9,7 @@
 
 ; The data needed to represent a snip
 ; See https://groups.google.com/g/racket-users/c/QcfTCnD-9bo for discussion on security
-(struct snip-data [snip-class snip-bytes])
+(struct snip-data [snip-class snip-bytes] #:transparent)
 
 (define (snip->snip-data snip)
   (define bytes-base-out (new editor-stream-out-bytes-base%))
