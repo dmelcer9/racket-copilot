@@ -11,12 +11,12 @@ racket-copilot
 TODO
 
 - Figure out how to properly structure docs and tests so raco works better
-- Implement structs in common/messages.rkt
-- Implement classes in common/edit-events.rkt
+- Implement structs in common/messages.rkt - Done
+- Implement classes in common/edit-events.rkt - Needs manual testing
 - Decide on msgpack vs json
 - Implement (de)serializer between messages.rkt and js-expr (or msgpack equivalent)
 - Implement (de)serializer between js-expr and port/channel
-- Write server for one session
+- Write server for one session - Wrote tests, needs impl
 - Write server for multiple sessions
 - Write client (run in own thread and accept messages from GUI)
 - Create editor program with GUI toolkit

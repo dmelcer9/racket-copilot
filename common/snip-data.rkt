@@ -1,6 +1,12 @@
 #lang racket
 (require racket/gui)
 
+(provide
+ (struct-out snip-data)
+ (contract-out
+  [snip->snip-data (-> (is-a?/c snip%) snip-data?)]
+  [snip-data->snip (-> snip-data? (is-a?/c snip%))]))
+
 ; The data needed to represent a snip
 ; See https://groups.google.com/g/racket-users/c/QcfTCnD-9bo for discussion on security
 (struct snip-data [snip-class snip-bytes])
