@@ -48,11 +48,60 @@
   (match-define (session-state clients current-host doc-info) sstate)
   (match sinput
     [(sess-client-connect client-info) ; Connect new client
-     (define new-sstate (sstate-connect-new sstate client-info))
+     (define new-sstate (sstate-connect-new sstate client-info)) ; TODO Send doc to new person
+     (define messages (append (participant-info-messages new-sstate) (document->messages doc-info (client-info-id client-info))))
+     (session-output messages new-sstate)]
+    [(sess-client-disconnect discon-id)
+     #:when (equal? current-host discon-id)
+     (session-output (host-disconnect-messages sstate) (session-state-end))]
+    [(sess-client-disconnect discon-id)
+     (define new-sstate (sstate-disconnect sstate discon-id))
      (define messages (participant-info-messages new-sstate))
      (session-output messages new-sstate)]
-    [_ (session-output '() '())]))
+    [(sess-client-msg id msg) (server-client-msg id msg sstate)]))
 
+; Number Client->ServerMessage SessionState -> SessionOutput
+; Same as server, but specifically for client messages
+(define (server-client-msg sending-client-id msg sstate)
+  (match-define (session-state clients current-host doc-info) sstate)
+  (define (make-error-output error)
+    (session-output (list (sess-client-msg sending-client-id (msg-error error))) sstate))
+  
+  (match msg
+    [(or (msg-new-session _ _)
+         (msg-join-session _ _ _)) ; Messages that this server doesn't handle
+     (make-error-output (error-illegal-state))]
+    [(or (msg-base-revision _)
+         (msg-incremental-edit _)
+         (msg-transfer-host _))
+     #:when (not (equal? sending-client-id current-host))
+     (make-error-output (error-not-allowed-by-role))]
+    [(msg-base-revision file)
+     (define new-sstate (session-state clients current-host (document file '())))
+     (define messages (send-msg-to-all-except-host sstate (λ (client) (sess-client-msg (client-info-id client) (msg-base-revision file)))))
+     (session-output messages new-sstate)]
+    [(msg-incremental-edit edit)
+     #:when (no-document? doc-info)
+     (make-error-output (error-illegal-state))]
+    [(msg-incremental-edit edit)
+     (match-define (document base revs) doc-info)
+     (define new-sstate (session-state clients current-host (document base (cons edit revs))))
+     (define messages (send-msg-to-all-except-host sstate (λ (client) (sess-client-msg (client-info-id client) (msg-incremental-edit edit)))))
+     (session-output messages new-sstate)]
+    [(msg-transfer-host new-host) ; Not a valid host
+     #:when (not (ormap (λ (client) (equal? (client-info-id client) current-host)) clients))
+     (make-error-output (error-illegal-state))]
+    [(msg-transfer-host new-host)
+     (define new-sstate (session-state clients new-host doc-info))
+     (define messages (participant-info-messages new-sstate))
+     (session-output messages new-sstate)]
+    [(msg-request-new-base-revision)
+     #:when (equal? sending-client-id current-host)
+     (make-error-output (error-not-allowed-by-role))]
+    [(msg-request-new-base-revision)
+     (define messages (list (sess-client-msg current-host (msg-request-new-base-revision))))
+     (session-output messages sstate)]))
+                                
 
 (module+ test
   (require rackunit)
@@ -171,8 +220,17 @@
   (match-define (session-state clients current-host doc-info) sstate)
   (session-state (append clients (list client-info)) current-host doc-info))
 
+; SessionState number -> SessionState
+; Disconnect participant in session state
+; ASSUME participant is not host
+(define (sstate-disconnect sstate client-id)
+  (match-define (session-state clients current-host doc-info) sstate)
+  (define new-clients (filter (λ (c) (not (equal? (client-info-id c) client-id))) clients))
+  (session-state new-clients current-host doc-info))
+
 (module+ test
-  (check-equal? (sstate-connect-new newly-created-server-state c2) server-state-after-first-join))
+  (check-equal? (sstate-connect-new newly-created-server-state c2) server-state-after-first-join)
+  (check-equal? (sstate-disconnect server-state-three-clients-c2-host 1) server-state-three-clients-c1-disconnect))
 
 ; SessionState -> (List ClientResponse)
 (define (participant-info-messages sstate)
@@ -185,3 +243,39 @@
 
 (module+ test
   (check-equal? (participant-info-messages server-state-after-first-join) two-clients-participant-info))
+
+; SessionState [ClientInfo -> ClientResponse] -> (List ClientResponse)
+(define (send-msg-to-all-except-host sstate message-gen)
+  (match-define (session-state clients current-host _) sstate)
+  (for/list ([client clients]
+             #:when (not (equal? (client-info-id client) current-host)))
+    (message-gen client)))
+
+; SessionState -> (List ClientResponse)
+(define (host-disconnect-messages sstate)
+  (send-msg-to-all-except-host
+   sstate
+   (λ (client) (sess-client-disconnect (client-info-id client)))))
+
+(module+ test
+  (check-equal? (host-disconnect-messages server-state-three-clients-c2-host)
+                (list (sess-client-disconnect 1)
+                      (sess-client-disconnect 3))))
+
+; Document Number -> (List ClientResponse)
+(define (document->messages doc send-id)
+  (match doc
+    [(no-document) '()]
+    [(document base incr-edits)
+     (cons (sess-client-msg send-id (msg-base-revision base))
+           (map (λ (edit) (sess-client-msg send-id (msg-incremental-edit edit)))
+                (reverse incr-edits)))]))
+
+(module+ test
+  (check-equal? (document->messages (no-document) 1) '())
+  (check-equal? (document->messages (document b0 '()) 1)
+                (list (sess-client-msg 1 (msg-base-revision b0))))
+  (check-equal? (document->messages (document b0 (list edit-evt-2 edit-evt-1)) 1)
+                (list (sess-client-msg 1 (msg-base-revision b0))
+                      (sess-client-msg 1 (msg-incremental-edit edit-evt-1))
+                      (sess-client-msg 1 (msg-incremental-edit edit-evt-2)))))

@@ -16,7 +16,7 @@ TODO
 - Decide on msgpack vs json
 - Implement (de)serializer between messages.rkt and js-expr (or msgpack equivalent)
 - Implement (de)serializer between js-expr and port/channel
-- Write server for one session - Wrote tests, needs impl
+- Write server for one session - Done
 - Write server for multiple sessions
 - Write client (run in own thread and accept messages from GUI)
 - Create editor program with GUI toolkit
